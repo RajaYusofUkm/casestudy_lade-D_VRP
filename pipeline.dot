@@ -1,0 +1,40 @@
+digraph Pipeline {
+    rankdir=TB;
+    graph [bgcolor="white", fontname="Helvetica", nodesep=0.45, ranksep=0.5];
+    node [style="filled", fontname="Helvetica", fontsize=12, color="#333333"];
+    edge [fontname="Helvetica", fontsize=11, color="#333333"];
+
+    start  [label="START\nDelivery nodes + time windows", shape=ellipse, fillcolor="#3CA55C", fontcolor="white"];
+
+    subgraph cluster_p1 {
+        label="PHASE 1 — Construction (runs first)";
+        fontname="Helvetica-Bold"; fontsize=13;
+        style="rounded,filled"; fillcolor="#EAF4FB"; color="#2E9BD6";
+        nn   [label="Nearest Neighbor Heuristic\nGreedily append the nearest unvisited\nnode by road distance", shape=box, fillcolor="#2E9BD6", fontcolor="white"];
+        init [label="Initial Route\n(feasible, but high-penalty Z)", shape=box, fillcolor="#AED6F1"];
+        nn -> init;
+    }
+
+    subgraph cluster_p2 {
+        label="PHASE 2 — Local Search: 2-Opt (runs after Phase 1)";
+        fontname="Helvetica-Bold"; fontsize=13;
+        style="rounded,filled"; fillcolor="#FDF2E2"; color="#F39C12";
+        swap [label="2-Opt swap:\nreverse a segment of the route", shape=box, fillcolor="#F39C12"];
+        dec  [label="New route Z\nlower than best?", shape=diamond, fillcolor="#F5B041"];
+        acc  [label="Accept swap\n(update best route)", shape=box, fillcolor="#AED6F1"];
+        imp  [label="Any improving swap\nfound in this pass?", shape=diamond, fillcolor="#F5B041"];
+        opt  [label="Optimized Route\n(minimized Z)", shape=box, fillcolor="#A9DFBF"];
+        swap -> dec;
+        dec  -> acc [label="Yes", color="#27AE60", fontcolor="#27AE60"];
+        dec  -> imp [label="No", color="#E74C3C", fontcolor="#E74C3C"];
+        acc  -> imp;
+        imp  -> swap [label="Yes (repeat pass)", color="#27AE60", fontcolor="#27AE60"];
+        imp  -> opt  [label="No (local optimum)", color="#E74C3C", fontcolor="#E74C3C"];
+    }
+
+    finish [label="END\nOutput optimized route", shape=ellipse, fillcolor="#E74C3C", fontcolor="white"];
+
+    start -> nn;
+    init  -> swap [label="hand initial route to 2-Opt"];
+    opt   -> finish;
+}

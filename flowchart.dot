@@ -1,0 +1,26 @@
+digraph NearestNeighbor {
+    rankdir=TB;
+    graph [splines=true, nodesep=0.5, ranksep=0.5, bgcolor="white"];
+    node [style="filled", fontname="Helvetica", fontsize=12, color="#333333"];
+    edge [fontname="Helvetica", fontsize=11, color="#333333"];
+
+    start  [label="START:\nCourier at Depot", shape=ellipse, fillcolor="#3CA55C", fontcolor="white"];
+    dec    [label="Are there any\nUnvisited Nodes?", shape=diamond, fillcolor="#F39C12", fontcolor="black"];
+    loop   [label="Loop through all\nremaining unvisited nodes", shape=box, fillcolor="#AED6F1"];
+    query  [label="Query Dijkstra Distance Matrix:\nTravel_Dist = Matrix[Current][Candidate]", shape=box, fillcolor="#2E9BD6", fontcolor="white"];
+    select [label="Select Candidate with\nMINIMUM Travel Distance", shape=box, fillcolor="#AED6F1"];
+    move   [label="Move Courier to Selected Node\n(Update Current Location)", shape=box, fillcolor="#AED6F1"];
+    mark   [label="Mark Node as VISITED", shape=box, fillcolor="#AED6F1"];
+    ret    [label="Return Courier to Depot", shape=box, fillcolor="#AED6F1"];
+    finish [label="END:\nComplete Route Generated", shape=ellipse, fillcolor="#E74C3C", fontcolor="white"];
+
+    start  -> dec;
+    dec    -> loop   [label="Yes", color="#27AE60", fontcolor="#27AE60"];
+    dec    -> ret    [label="No (All Visited)", color="#E74C3C", fontcolor="#E74C3C"];
+    loop   -> query;
+    query  -> select;
+    select -> move;
+    move   -> mark;
+    mark   -> dec;
+    ret    -> finish;
+}
