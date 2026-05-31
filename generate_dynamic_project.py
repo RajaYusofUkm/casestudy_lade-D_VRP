@@ -73,7 +73,7 @@ def time_to_hours(time_str):
     t = datetime.datetime.strptime(time_str, "%m-%d %H:%M:%S")
     return t.hour + t.minute / 60.0 + t.second / 3600.0
 
-nodes = {'Depot': (121.52000, 31.08000)}
+nodes = {'Depot': (121.50500, 31.08500)}
 time_windows = {}
 
 for i, row in df_subset.iterrows():
@@ -102,8 +102,9 @@ def evaluate_route_detailed(route):
         wait_time = 0.0
         lateness = 0.0
         
+        travel_time = time_matrix[curr_node][next_node]
         step_title = f"Step {i+1}:\n{curr_node} -> {next_node}"
-        calc_str = f"• Distance = {dist:.3f} km\n• Arrival (A) = {arrival_time:.3f} h\n"
+        calc_str = f"• Distance = {dist:.3f} km\n• Travel Time = {travel_time:.4f} h\n• Arrival (A) = {current_time:.3f} + {travel_time:.4f} = {arrival_time:.3f} h\n"
 
         bd = speed_breakdown.get(curr_node, {}).get(next_node, [])
         if bd:
@@ -197,6 +198,9 @@ def two_opt_search(initial_route):
 opt_route = two_opt_search(nn_route)
 opt_z, opt_dist, opt_late, opt_wait, opt_ot, opt_ex, opt_steps = evaluate_route_detailed(opt_route)
 
+# --- Figure numbering (document order); single source of truth so numbers never drift ---
+FIG_NET, FIG_PIPE, FIG_FLOW, FIG_ROUTE, FIG_MAP, FIG_SPEED, FIG_PERF, FIG_CONV, FIG_GANTT, FIG_VERIFY = range(1, 11)
+
 # --- REGENERATE DOCX ---
 doc = Document()
 
@@ -237,9 +241,9 @@ doc.add_heading('1.0 Introduction', 1)
 doc.add_paragraph("Combinatorial optimization problems form the core of operational research and advanced artificial intelligence, dictating how limited resources are allocated in highly constrained environments. The Vehicle Routing Problem (VRP) is arguably the most prominent of these challenges, aiming to determine the most efficient set of routes for a fleet of vehicles to deliver goods to a given set of customers. When strict service delivery times are introduced, the problem evolves into the Vehicle Routing Problem with Time Windows (VRPTW), an NP-hard problem where computational complexity scales exponentially with the number of delivery nodes.")
 doc.add_paragraph("In practice, analytical exact solvers (e.g., Integer Linear Programming) fail to scale for large logistics operations. Thus, AI-driven heuristics and metaheuristics are required to find near-optimal solutions within feasible computational timeframes. This project utilizes the Cainiao-AI/LaDe dataset, a large-scale repository of real-world last-mile delivery data, to bridge the gap between theoretical algorithm design and practical, noisy spatial-temporal data.")
 doc.add_heading('1.1 Real-World Graph Network & Dijkstra Integration', 2)
-doc.add_paragraph("Unlike theoretical Euclidean distance (straight-line) models, this project computes routing distance and time penalties using a real-world mathematical graph model extracted from OpenStreetMap. Over 163,000 roads in Shanghai were processed into a Directed Graph (nx.DiGraph). The Dijkstra algorithm was utilized to calculate the shortest path matrix while strictly adhering to real-world physics: One-Way constraints (forcing long U-turn detours) and dynamic class-based average speeds (e.g., Motorway = 95km/h, Residential = 24.7km/h). This hyper-realistic environment is the primary reason the Constructive Heuristic performs extremely poorly compared to Local Search Optimization.")
-doc.add_paragraph("Figure 1 visualizes this extracted road network for the operational area in Shanghai. The left panel shows the full delivery area, while the right panel zooms into the critical zone where one-way restrictions force long detours; the affected delivery nodes are highlighted.")
-add_figure(doc, 'road_network_combined.png', 'Figure 1: Real-world Shanghai road network extracted from OpenStreetMap (left: full operational area; right: zoom-in on the critical one-way zone).', 6.5)
+doc.add_paragraph("Unlike theoretical Euclidean distance (straight-line) models, this project computes routing distance and time penalties using a real-world mathematical graph model extracted from OpenStreetMap. Over 163,000 roads in Shanghai were processed into a Directed Graph (nx.DiGraph). The Dijkstra algorithm was utilized to calculate the shortest path matrix while strictly respecting real-world routing constraints: one-way restrictions (which force long detours) and dynamic class-based average speeds (e.g., Motorway = 95 km/h, Residential = 24.7 km/h). This high-fidelity environment is the primary reason the Constructive Heuristic performs markedly worse than Local Search Optimization.")
+doc.add_paragraph(f"Figure {FIG_NET} visualizes this extracted road network for the operational area in Shanghai. The left panel shows the full delivery area, while the right panel zooms into the critical zone where one-way restrictions force long detours; the affected delivery nodes are highlighted.")
+add_figure(doc, 'road_network_combined.png', f'Figure {FIG_NET}: Real-world Shanghai road network extracted from OpenStreetMap (left: full operational area; right: zoom-in on the critical one-way zone).', 6.5)
 
 doc.add_heading('1.2 Class-Based Speed Imputation', 2)
 if road_total:
@@ -288,6 +292,7 @@ data_const = [
     ('Hard Constraint\n(Strict Feasibility)', 'Node Visitation\n(Hamiltonian Path)', 'Every customer node must be visited exactly once. Violation renders the route completely invalid.'),
     ('Hard Constraint\n(Strict Feasibility)', 'Depot Anchoring', 'All courier routes must originate from and terminate at the central Depot.'),
     ('Hard Constraint\n(Strict Feasibility)', 'Time Causality\n(Ready Time)', "A courier arriving at a node prior to its earliest 'ready time' (E_j) cannot commence service. The courier is forcefully put into an 'idle wait' state until E_j."),
+    ('Hard Constraint\n(Strict Feasibility)', 'GIS Topology\n(One-Way Streets)', 'The physical road network enforces one-way street directions. Vehicles mathematically cannot traverse against the designated flow of traffic.'),
     ('Soft Constraint\n(Service SLA)', 'Time Windows\n(Due Dates)', 'Deliveries should be completed before the specified due date (L_j). Late arrivals incur a heavy penalty.'),
     ('Soft Constraint\n(Resource Cost)', 'Idle Wait Time', 'A courier forced to wait idly due to arriving too early wastes manpower. Incurs an hourly wait penalty.'),
     ('Soft Constraint\n(Labor Cost)', 'Overtime Limit', 'The standard operational shift is 8 hours. Routes exceeding 8 hours of total duration incur an hourly overtime penalty.'),
@@ -329,16 +334,32 @@ for item in data_nom:
 
 p_eq = doc.add_paragraph("Minimize Z = Σ(c_ij · x_ij) + βΣ(P_j) + αΣ(W_j) + γ(O) + δ(E)", style='Intense Quote')
 p_eq.alignment = WD_ALIGN_PARAGRAPH.CENTER
-doc.add_paragraph("Where individual penalties are mathematically defined as:")
-doc.add_paragraph("• Lateness P_j = max(0, A_j - L_j)")
-doc.add_paragraph("• Overtime O = max(0, T_total - 8.0)")
-doc.add_paragraph("• Excess Dist E = max(0, Σc_ij - 15.0)")
+doc.add_paragraph("Where individual penalties and their exact weights are mathematically defined as:")
+p1 = doc.add_paragraph(style='List Bullet')
+p1.add_run("Lateness P_j = max(0, A_j - L_j) ").bold = True
+p1.add_run("➔ Weight (β): ")
+p1.add_run("50 penalty points per hour").bold = True
+
+p2 = doc.add_paragraph(style='List Bullet')
+p2.add_run("Idle Wait Time W_j = max(0, E_j - A_j) ").bold = True
+p2.add_run("➔ Weight (α): ")
+p2.add_run("10 penalty points per hour").bold = True
+
+p3 = doc.add_paragraph(style='List Bullet')
+p3.add_run("Overtime O = max(0, T_total - 8.0) ").bold = True
+p3.add_run("➔ Weight (γ): ")
+p3.add_run("100 penalty points per hour").bold = True
+
+p4 = doc.add_paragraph(style='List Bullet')
+p4.add_run("Excess Dist E = max(0, Σc_ij - 15.0) ").bold = True
+p4.add_run("➔ Weight (δ): ")
+p4.add_run("20 penalty points per km").bold = True
 
 doc.add_heading('3.0 Methodology: Heuristic Design', 1)
-doc.add_paragraph("This project solves the VRPTW with a two-phase heuristic pipeline, summarized in Figure 2. Phase 1 (Construction) runs first: the Nearest Neighbor heuristic greedily builds a complete but sub-optimal initial route. Phase 2 (Local Search) runs afterwards: the 2-Opt operator repeatedly reverses route segments and keeps any swap that lowers the objective Z, iterating until no improving swap remains (a local optimum). The detailed logic of each phase is presented in the subsequent sections (Nearest Neighbor in Section 3, 2-Opt in Section 6).")
-add_figure(doc, 'pipeline.png', 'Figure 2: Overall two-phase solution pipeline — when the Nearest Neighbor construction (Phase 1) and the 2-Opt local search (Phase 2) are executed.', 4.2)
+doc.add_paragraph(f"This project solves the VRPTW with a two-phase heuristic pipeline, summarized in Figure {FIG_PIPE}. Phase 1 (Construction) runs first: the Nearest Neighbor heuristic greedily builds a complete but sub-optimal initial route. Phase 2 (Local Search) runs afterwards: the 2-Opt operator repeatedly reverses route segments and keeps any swap that lowers the objective Z, iterating until no improving swap remains (a local optimum). The detailed logic of each phase is presented in the subsequent sections (Nearest Neighbor in Section 3, 2-Opt in Section 6).")
+add_figure(doc, 'pipeline.png', f'Figure {FIG_PIPE}: Overall two-phase solution pipeline — when the Nearest Neighbor construction (Phase 1) and the 2-Opt local search (Phase 2) are executed.', 4.2)
 doc.add_heading('3.1 Constructive Heuristic (Nearest Neighbor)', 2)
-doc.add_paragraph("A Constructive Heuristic builds a feasible solution from scratch. For this project, a Nearest Neighbor (NN) algorithm was designed. At each decision point, the algorithm greedily selects the unvisited node with the absolute lowest physical travel distance (c_ij) from the current position. While computationally inexpensive, this approach is 'spatially greedy' and oblivious to temporal constraints and multiple penalties.")
+doc.add_paragraph("A Constructive Heuristic builds a feasible solution from scratch. For this project, a Nearest Neighbor (NN) algorithm was designed. At each decision point, the algorithm greedily selects the unvisited node with the lowest physical travel distance (c_ij) from the current position. While computationally inexpensive, this approach is 'spatially greedy' and oblivious to temporal constraints and multiple penalties.")
 
 doc.add_heading('3.2 Pseudocode', 2)
 pseudo = (
@@ -367,15 +388,28 @@ run_pp.font.name = 'Courier New'
 run_pp.font.size = Pt(10)
 
 doc.add_heading('3.3 Decision-Making Logic & Flowchart', 2)
-doc.add_paragraph("Figure 3 visually represents this iterative spatial search loop, from initializing the route at the Depot to greedily appending the nearest unvisited node until all customers are served.")
-add_figure(doc, 'flowchart.png', 'Figure 3: Decision-making flowchart of the Nearest Neighbor constructive heuristic.', 4.0)
+doc.add_paragraph(f"Figure {FIG_FLOW} visually represents this iterative spatial search loop, from initializing the route at the Depot to greedily appending the nearest unvisited node until all customers are served.")
+add_figure(doc, 'flowchart.png', f'Figure {FIG_FLOW}: Decision-making flowchart of the Nearest Neighbor constructive heuristic.', 4.0)
 
 doc.add_heading('4.0 Implementation and Data Extraction', 1)
 doc.add_heading('4.1 Algorithmic Enforcement (Task d)', 2)
-doc.add_paragraph("The heuristic was implemented in Python. The objective function was programmed to calculate continuous time simulation, tracking a 'current_time' variable. Inter-node travel times are derived from the pre-computed Dijkstra time matrix, where edge speeds are assigned dynamically per road class (e.g., Motorway = 95 km/h, Residential = 24.7 km/h); a fixed service time of 0.1 hours is added at every node.")
+doc.add_paragraph("The heuristic and its objective function were implemented in Python. The evaluator performs a continuous-time simulation that walks the route node by node, tracking a current_time variable: inter-node travel times are read from the pre-computed Dijkstra time matrix (edge speeds assigned per road class, e.g., Motorway = 95 km/h, Residential = 24.7 km/h), and a fixed service time of 0.1 hours is added at every node. The implementation provides the three components required for this task, as detailed below.")
+
+d1 = doc.add_paragraph(style='List Bullet')
+d1.add_run("Hard-constraint enforcement (prevents violations). ").bold = True
+d1.add_run("Hard constraints are satisfied by construction rather than penalised. The Nearest Neighbor loop appends each customer exactly once and removes it from the unvisited set, guaranteeing a single-visit Hamiltonian path; the route is explicitly anchored to begin and end at the Depot; one-way restrictions are enforced upstream by the directed road graph, since Dijkstra cannot traverse an edge against its permitted direction; and time causality is enforced by forcing the courier to idle until a node's ready time (E_j) before service can commence.")
+
+d2 = doc.add_paragraph(style='List Bullet')
+d2.add_run("Objective function value calculation. ").bold = True
+d2.add_run("Once the route is simulated, its solution quality is reduced to a single scalar Z = Σc_ij + βΣP_j + αΣW_j + γO + δE, combining total travel distance with the weighted soft-constraint penalties. This value is what ranks one candidate route against another throughout the report.")
+
+d3 = doc.add_paragraph(style='List Bullet')
+d3.add_run("Penalty calculation (soft-constraint breaches). ").bold = True
+d3.add_run("Each soft breach is quantified continuously and added to Z: lateness P_j = max(0, A_j − L_j) weighted at 50 per hour, idle wait W_j = max(0, E_j − A_j) at 10 per hour, overtime O = max(0, T_total − 8) at 100 per hour, and excess distance E = max(0, Σc_ij − 15) at 20 per km. The full, step-by-step evaluation of these terms for the generated route is shown in Table 5.")
 
 doc.add_heading('4.2 Dataset Filtering (Task e)', 2)
-doc.add_paragraph(f"The LaDe dataset was dynamically fetched from HuggingFace (`delivery_sh`), specifically Date: {TARGET_DATE}, and Courier ID: {TARGET_COURIER}. Exactly {NUM_NODES} nodes were extracted for the experiment.")
+doc.add_paragraph(f"As required by this task, the LaDe dataset was filtered to a manageable instance by city and date: the Shanghai subset (`delivery_sh`) on Date {TARGET_DATE}, further narrowed to a single courier (Courier ID {TARGET_COURIER}) to obtain one realistic working day. This yields exactly {NUM_NODES} delivery nodes, a tractable instance for the step-by-step manual proof while remaining drawn entirely from real logistics data.")
+doc.add_paragraph("Note: The central Depot coordinate (121.50500, 31.08500) was placed centrally relative to this cluster of customer nodes so that it serves as a realistic distribution origin, giving balanced routing geometry and representative travel distances.").bold = True
 
 doc.add_paragraph(f"Table 4: Dynamically Extracted Spatial-Temporal Data for Shanghai Courier {TARGET_COURIER}").bold = True
 table2 = doc.add_table(rows=1, cols=4)
@@ -386,10 +420,16 @@ hdr[1].text = 'Coordinates (Lng, Lat)'
 hdr[2].text = 'Ready Time (E_j)'
 hdr[3].text = 'Due Date (L_j)'
 
+depot_row = table2.add_row().cells
+depot_row[0].text = 'Depot'
+depot_row[1].text = f"({nodes['Depot'][0]:.5f}, {nodes['Depot'][1]:.5f})"
+depot_row[2].text = "N/A"
+depot_row[3].text = "N/A"
+
 for k in customers:
     row_cells = table2.add_row().cells
     row_cells[0].text = k
-    row_cells[1].text = f"({nodes[k][0]}, {nodes[k][1]})"
+    row_cells[1].text = f"({nodes[k][0]:.5f}, {nodes[k][1]:.5f})"
     row_cells[2].text = f"{time_windows[k][0]:.2f} h"
     row_cells[3].text = f"{time_windows[k][1]:.2f} h"
 
@@ -440,14 +480,26 @@ run_p2 = p_pseudo2.add_run(pseudo_2opt)
 run_p2.font.name = 'Courier New'
 run_p2.font.size = Pt(10)
 
-doc.add_heading('6.2 Route Visualization', 2)
-doc.add_paragraph("Figure 4 contrasts the spatial layout of the initial Nearest Neighbor route against the 2-Opt optimized route. The greedy route exhibits long crossing edges, whereas the optimized route is reordered so that the delivery sequence respects the temporal time windows.")
-add_figure(doc, 'route_comparison.png', 'Figure 4: Route visualization — Nearest Neighbor (left, high penalty) versus 2-Opt optimized (right).', 6.5)
+doc.add_heading('6.2 Route Visualization & Speed Profiling', 2)
+doc.add_paragraph(f"Figure {FIG_ROUTE} contrasts the spatial layout of the initial Nearest Neighbor route against the 2-Opt optimized route. The greedy route exhibits long crossing edges, whereas the optimized route is reordered so that the delivery sequence respects the temporal time windows.")
+add_figure(doc, 'route_comparison.png', f'Figure {FIG_ROUTE}: Route visualization — Nearest Neighbor (left, high penalty) versus 2-Opt optimized (right).', 6.5)
+doc.add_paragraph(f"Figure {FIG_MAP} renders the same 2-Opt optimized route on the live OpenStreetMap street network, with direction-of-travel arrows and every segment colored by its road class (fclass); the legend reports the class speed used in the Dijkstra time matrix (e.g., primary = 59.0 km/h, residential = 24.7 km/h). The red triangular markers flag One-Way Constraint Nodes — locations where the road segment is legally restricted to a single direction of travel. This restriction is enforced upstream in the directed road graph: each one-way street is stored as a single directed edge, so Dijkstra is mathematically incapable of routing the courier against the permitted flow of traffic. The direction-of-travel arrows along each segment confirm that the optimized path always traverses these edges in their legal direction. This is the real-world, navigable counterpart to the schematic comparison in Figure {FIG_ROUTE}, confirming that the route follows valid one-way-respecting streets.")
+add_figure(doc, 'shanghai_map_screenshot.png', f'Figure {FIG_MAP}: Interactive OpenStreetMap view of the 2-Opt optimized route — actual street alignments, driving-direction arrows, and fclass-colored segments labelled with their assigned class speeds. Red triangular markers denote one-way-restricted nodes (N11, N14), which Dijkstra can only traverse in their legal direction.', 6.5)
+doc.add_paragraph(f"Figure {FIG_SPEED} illustrates a detailed breakdown of the average travel speed (km/h) for every single node-to-node leg in the sequence, allowing for a side-by-side behavioral comparison between the Nearest Neighbor and 2-Opt algorithms based on real road topologies.")
+add_figure(doc, 'speed_profile.png', f'Figure {FIG_SPEED}: Node-to-Node Average Speed Profile Comparison (Nearest Neighbor vs 2-Opt Local Search).', 6.0)
 
 doc.add_heading('6.3 Performance Comparison', 2)
-doc.add_paragraph("Table 6 compares the final output generated by both algorithms evaluated against the multi-objective Z function on the real-world subset, and Figure 5 visualizes the same comparison.")
+doc.add_paragraph("Table 6 places the two algorithms side by side and decomposes the objective Z into its five constituent terms — travel distance, lateness penalty, wait penalty, overtime penalty, and excess-distance penalty. Reporting the components separately, rather than only the aggregate score, makes the source of each algorithm's cost explicit and allows the overall improvement to be attributed to a specific penalty term.")
 
-doc.add_paragraph("Table 6: Dynamic Performance Comparison").bold = True
+doc.add_paragraph("The two delivery sequences evaluated in Table 6 are:")
+rp_nn = doc.add_paragraph(style='List Bullet')
+rp_nn.add_run("Nearest Neighbor route: ").bold = True
+rp_nn.add_run(" → ".join(nn_route))
+rp_opt = doc.add_paragraph(style='List Bullet')
+rp_opt.add_run("2-Opt optimized route: ").bold = True
+rp_opt.add_run(" → ".join(opt_route))
+
+doc.add_paragraph("Table 6: Performance comparison of the Nearest Neighbor and 2-Opt routes across all objective components").bold = True
 table_comp = doc.add_table(rows=1, cols=7)
 table_comp.style = 'Table Grid'
 hdr = table_comp.rows[0].cells
@@ -459,28 +511,28 @@ hdr[4].text = 'Overtime Penalty'
 hdr[5].text = 'Excess Dist Penalty'
 hdr[6].text = 'Objective Score (Z)'
 data_comp = [
-    (f"Nearest Neighbor\n({' -> '.join(nn_route)})", f"{nn_dist:.2f}", f"{nn_late:.2f}", f"{nn_wait:.2f}", f"{nn_ot:.2f}", f"{nn_ex:.2f}", f"{nn_z:.2f}"),
-    (f"2-Opt Local Search\n({' -> '.join(opt_route)})", f"{opt_dist:.2f}", f"{opt_late:.2f}", f"{opt_wait:.2f}", f"{opt_ot:.2f}", f"{opt_ex:.2f}", f"{opt_z:.2f}")
+    ("Nearest Neighbor", f"{nn_dist:.2f}", f"{nn_late:.2f}", f"{nn_wait:.2f}", f"{nn_ot:.2f}", f"{nn_ex:.2f}", f"{nn_z:.2f}"),
+    ("2-Opt Local Search", f"{opt_dist:.2f}", f"{opt_late:.2f}", f"{opt_wait:.2f}", f"{opt_ot:.2f}", f"{opt_ex:.2f}", f"{opt_z:.2f}")
 ]
 for item in data_comp:
     row_cells = table_comp.add_row().cells
     for i in range(7):
         row_cells[i].text = item[i]
 
-doc.add_paragraph(f"\nAs shown in Table 6 and Figure 5, the core failure of the Constructive Heuristic was its spatial greediness: by always chasing the spatially nearest node, it serviced late-opening nodes first and consequently arrived at every earlier-due node hours past its deadline, triggering a chain reaction of lateness penalties (total lateness penalty = {nn_late:.2f}). The 2-Opt metaheuristic resolved this by evaluating each candidate route against the full objective function Z, reordering the deliveries into a time-feasible sequence. This reduced the total objective from {nn_z:.2f} to {opt_z:.2f} (a {100*(nn_z-opt_z)/nn_z:.1f}% improvement) and eliminated the lateness penalty entirely (from {nn_late:.2f} to {opt_late:.2f}).")
-add_figure(doc, 'performance_chart.png', 'Figure 5: Performance comparison of the objective components (symmetric-log scale due to the large Nearest Neighbor penalty).', 5.5)
+doc.add_paragraph(f"\nAs shown in Table 6 and Figure {FIG_PERF}, the principal weakness of the Constructive Heuristic is its spatial greediness: by always moving to the spatially nearest node, it services late-opening nodes first and consequently reaches earlier-due nodes well past their deadlines, accumulating large lateness penalties (total lateness penalty = {nn_late:.2f}). The 2-Opt metaheuristic resolved this by evaluating each candidate route against the full objective function Z, reordering the deliveries into a time-feasible sequence. This reduced the total objective from {nn_z:.2f} to {opt_z:.2f} (a {100*(nn_z-opt_z)/nn_z:.1f}% improvement) and eliminated the lateness penalty entirely (from {nn_late:.2f} to {opt_late:.2f}).")
+add_figure(doc, 'performance_chart.png', f'Figure {FIG_PERF}: Performance comparison of the objective components (symmetric-log scale due to the large Nearest Neighbor penalty).', 5.5)
 
 doc.add_heading('6.4 Convergence Analysis', 2)
-doc.add_paragraph("Figure 6 traces the objective cost Z at each accepted 2-Opt swap. The monotonic descent demonstrates the Hill Climbing behaviour of the search as it iteratively escapes the poor initial solution until it converges to a local optimum.")
-add_figure(doc, 'convergence.png', 'Figure 6: Convergence of the 2-Opt local search (objective Z at each accepted improvement).', 5.5)
+doc.add_paragraph(f"Figure {FIG_CONV} traces the objective cost Z at each accepted 2-Opt swap. The monotonic descent demonstrates the Hill Climbing behaviour of the search as it iteratively escapes the poor initial solution until it converges to a local optimum.")
+add_figure(doc, 'convergence.png', f'Figure {FIG_CONV}: Convergence of the 2-Opt local search (objective Z at each accepted improvement).', 5.5)
 
 doc.add_heading('6.5 Temporal Analysis (Gantt Timeline)', 2)
-doc.add_paragraph("Figure 7 presents the per-leg operational timeline of both routes using the Dijkstra travel-time model. The Nearest Neighbor schedule is dominated by late deliveries (red), whereas the 2-Opt schedule converts these into on-time services (green) at the cost of some idle waiting (yellow).")
-add_figure(doc, 'gantt.png', 'Figure 7: Operational timeline (Gantt) — Nearest Neighbor versus 2-Opt optimized route.', 6.5)
+doc.add_paragraph(f"Figure {FIG_GANTT} presents the per-leg operational timeline of both routes using the Dijkstra travel-time model. The Nearest Neighbor schedule is dominated by late deliveries (red), whereas the 2-Opt schedule converts these into on-time services (green) at the cost of some idle waiting (yellow).")
+add_figure(doc, 'gantt.png', f'Figure {FIG_GANTT}: Operational timeline (Gantt) — Nearest Neighbor versus 2-Opt optimized route.', 6.5)
 
 doc.add_heading('6.6 Route Verification by Road Class', 2)
-doc.add_paragraph("To make the road-class breakdown independently auditable, Figure 8 draws the actual Dijkstra shortest path of the optimized 2-Opt route with every segment colored by its OpenStreetMap road class (fclass). Because the geometry is taken directly from the road graph used to build the time matrix, the reader can visually confirm which fclass — and hence which assigned speed — each leg of the route traverses. This is the visual counterpart to the numeric per-leg breakdown, and it has been cross-checked so that the summed distance and time of each leg's segments exactly match the distance and time matrices.")
-add_figure(doc, 'route_fclass_verification.png', 'Figure 8: Verification map — the actual 2-Opt route path colored by OpenStreetMap road class (fclass); each color corresponds to the assigned class speed used in the Dijkstra time matrix.', 6.0)
+doc.add_paragraph(f"To make the road-class breakdown independently auditable, Figure {FIG_VERIFY} draws the actual Dijkstra shortest path of the optimized 2-Opt route with every segment colored by its OpenStreetMap road class (fclass). Because the geometry is taken directly from the road graph used to build the time matrix, the reader can visually confirm which fclass — and hence which assigned speed — each leg of the route traverses. This is the visual counterpart to the numeric per-leg breakdown, and it has been cross-checked so that the summed distance and time of each leg's segments exactly match the distance and time matrices.")
+add_figure(doc, 'route_fclass_verification.png', f'Figure {FIG_VERIFY}: Verification map — the actual 2-Opt route path colored by OpenStreetMap road class (fclass); each color corresponds to the assigned class speed used in the Dijkstra time matrix.', 6.0)
 
 doc.save('VRP_Technical_Report.docx')
 print(f"Generated VRP_Technical_Report.docx dynamically!")
@@ -510,7 +562,6 @@ for cell in nb['cells']:
                 "dataset = load_dataset(\"Cainiao-AI/LaDe-D\", split=\"delivery_sh\")\n",
                 "df = dataset.to_pandas()\n",
                 "\n",
-                "# Extract actual route data for a specific courier on a specific day\n",
                 "df_subset = df[(df['ds'] == TARGET_DATE) & (df['courier_id'] == TARGET_COURIER)].head(NUM_NODES).reset_index()\n",
                 "print(\"\\n--- Extracted Node Parameters ---\")\n",
                 "\n",
@@ -518,7 +569,7 @@ for cell in nb['cells']:
                 "    t = datetime.datetime.strptime(time_str, \"%m-%d %H:%M:%S\")\n",
                 "    return t.hour + t.minute / 60.0 + t.second / 3600.0\n",
                 "\n",
-                "nodes = {'Depot': (121.52000, 31.08000)}\n",
+                "nodes = {'Depot': (121.50500, 31.08500)}\n",
                 "time_windows = {}\n",
                 "\n",
                 "for i, row in df_subset.iterrows():\n",
@@ -601,6 +652,10 @@ for cell in nb['cells']:
                 "print(f\"\\nNN Final Z: {nn_z:.2f} | Dist: {nn_dist:.2f} | Late Pen: {nn_late:.2f} | Wait Pen: {nn_wait:.2f} | OT Pen: {nn_ot:.2f} | Dist Pen: {nn_ex:.2f}\")\n"
             ]
 
+        # (Folium map cell is self-contained in the notebook: it imports plugins, draws
+        #  fclass-colored arrows, uses fclass-correct speeds, and saves shanghai_map.html.
+        #  No post-processing here -- the previous logic was non-idempotent.)
+
     if cell['cell_type'] == 'markdown':
         content = "".join(cell['source'])
         if 'Task (e) - Execution & Manual Calculation' in content:
@@ -631,7 +686,7 @@ for cell in nb['cells']:
                 f"*   **Local Search (2-Opt) Score:** $\\approx {opt_z:.2f}$ (lateness penalty = {opt_late:.2f}).\n",
                 "\n",
                 "**Why the improvement occurred:**\n",
-                f"The Constructive Heuristic (Nearest Neighbor) completely ignores the temporal dimension. By greedily minimizing physical distance, it visits whichever node is spatially closest even when that node's time window opens late, which forces the courier to idle and then arrive at every remaining (earlier-due) node well past its due date, triggering a chain reaction of lateness penalties. The **2-Opt Local Search** evaluates each neighbouring route against the full objective function $Z$, so it reorders the sequence into a time-feasible order, cutting the objective by {100*(nn_z-opt_z)/nn_z:.1f}% and eliminating the lateness penalty (from {nn_late:.2f} to {opt_late:.2f})."
+                f"The Constructive Heuristic (Nearest Neighbor) does not account for the temporal dimension. By greedily minimizing physical distance, it visits whichever node is spatially closest even when that node's time window opens late, which forces the courier to idle and then arrive at every remaining (earlier-due) node well past its due date, accumulating substantial lateness penalties. The **2-Opt Local Search** evaluates each neighbouring route against the full objective function $Z$, so it reorders the sequence into a time-feasible order, cutting the objective by {100*(nn_z-opt_z)/nn_z:.1f}% and eliminating the lateness penalty (from {nn_late:.2f} to {opt_late:.2f})."
             ]
 
 
@@ -649,21 +704,10 @@ new_cell = {
     "\n",
     "print(\"1. Loading coordinate matrix...\")\n",
     "with open('matrix.json', 'r') as f:\n",
-    "    pass\n",
+    "    matrix_data = json.load(f)\n",
+    "nodes_epsg3857 = matrix_data['nodes_epsg3857']\n",
     "\n",
-    "nodes_epsg3857 = {\n",
-    "    \"Depot\": (13527544.52, 3643143.03),\n",
-    "    \"N1\": (13525583.07, 3643127.43), \"N2\": (13525580.85, 3643123.53),\n",
-    "    \"N3\": (13525586.41, 3643110.54), \"N4\": (13525585.30, 3643117.03),\n",
-    "    \"N5\": (13525704.41, 3643221.02), \"N6\": (13525565.26, 3643083.24),\n",
-    "    \"N7\": (13525500.70, 3643465.38), \"N8\": (13525633.17, 3643430.29),\n",
-    "    \"N9\": (13525492.90, 3643465.38), \"N10\": (13525620.92, 3643547.27),\n",
-    "    \"N11\": (13525449.49, 3643369.19), \"N12\": (13525488.45, 3643461.48),\n",
-    "    \"N13\": (13525527.41, 3643477.08), \"N14\": (13525520.73, 3643393.89),\n",
-    "    \"N15\": (13525972.69, 3643273.01)\n",
-    "}\n",
-    "\n",
-    "oneway_nodes = ['N7', 'N8', 'N9', 'N10', 'N15']\n",
+    "oneway_nodes = ['N11', 'N14']\n",
     "df_roads = pd.read_csv('roads_shanghai.csv', sep='\\t')\n",
     "\n",
     "def plot_on_ax(ax, title, target_nodes_keys, margin, is_zoom=False):\n",
@@ -748,6 +792,81 @@ cleaned_cells = []
 for c in nb['cells']:
     if c['cell_type'] == 'code' and any('road_network_combined.png' in line or 'road_network_map.png' in line for line in c['source']):
         continue
+    if c['cell_type'] == 'code' and any('speed_profile.png' in line for line in c['source']):
+        continue
+    if c['cell_type'] == 'markdown' and any('**Note on Depot Coordinate:**' in line for line in c['source']):
+        continue
+        
+    if c['cell_type'] == 'code' and any('import folium' in line for line in c['source']):
+        cleaned_cells.append({
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "source": [
+                "# NEW CELL: Visualize Average Speed Per Leg\n",
+                "import matplotlib.pyplot as plt\n",
+                "import numpy as np\n",
+                "from collections import Counter\n",
+                "\n",
+                "def get_speed_data(route):\n",
+                "    legs, speeds, summaries = [], [], []\n",
+                "    for a, b in zip(route[:-1], route[1:]):\n",
+                "        d = dist_matrix[a][b]\n",
+                "        t = time_matrix[a][b]\n",
+                "        avg_s = d / t if t > 0 else 0\n",
+                "        legs.append(f\"{a}\\n↓\\n{b}\")\n",
+                "        speeds.append(avg_s)\n",
+                "        fcl = path_geometry.get(a, {}).get(b, {}).get('fclass', [])\n",
+                "        if fcl:\n",
+                "            common = [r for r, count in Counter(fcl).most_common(2)]\n",
+                "            summaries.append(', '.join(common))\n",
+                "        else:\n",
+                "            summaries.append('Same Location')\n",
+                "    return legs, speeds, summaries\n",
+                "\n",
+                "nn_legs, nn_speeds, nn_sums = get_speed_data(nn_route)\n",
+                "opt_legs, opt_speeds, opt_sums = get_speed_data(optimized_route)\n",
+                "\n",
+                "fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12), sharey=True)\n",
+                "\n",
+                "def plot_bars(ax, legs, speeds, summaries, title, color):\n",
+                "    bars = ax.bar(legs, speeds, color=color, edgecolor='black')\n",
+                "    ax.set_title(title, fontsize=14, fontweight='bold')\n",
+                "    ax.set_ylabel('Avg Speed (km/h)', fontsize=12)\n",
+                "    ax.axhline(y=np.mean(speeds), color='r', linestyle='--', label=f'Avg: {np.mean(speeds):.1f} km/h')\n",
+                "    for i, bar in enumerate(bars):\n",
+                "        yval = bar.get_height()\n",
+                "        if summaries[i] == 'Same Location':\n",
+                "            ax.text(bar.get_x() + bar.get_width()/2, yval + 1.5, 'Same\\nLoc', ha='center', va='bottom', fontsize=9, color='gray', fontweight='bold')\n",
+                "        else:\n",
+                "            ax.text(bar.get_x() + bar.get_width()/2, yval + 1.5, f\"{yval:.1f}\", ha='center', va='bottom', fontsize=10, fontweight='bold')\n",
+                "            if yval > 5:\n",
+                "                ax.text(bar.get_x() + bar.get_width()/2, yval/2, summaries[i].replace(', ', '\\n'), ha='center', va='center', fontsize=9, color='black', rotation=90)\n",
+                "    ax.legend()\n",
+                "\n",
+                "plot_bars(ax1, nn_legs, nn_speeds, nn_sums, 'Nearest Neighbor (Greedy) - Speed Profile', 'salmon')\n",
+                "plot_bars(ax2, opt_legs, opt_speeds, opt_sums, '2-Opt Local Search - Speed Profile', 'skyblue')\n",
+                "\n",
+                "plt.tight_layout()\n",
+                "plt.savefig('speed_profile.png', dpi=300)\n",
+                "plt.show()\n",
+                "\n",
+                "print(\"\\n--- Detailed Road Usage per Route Segment (2-Opt) ---\")\n",
+                "for i, (a, b) in enumerate(zip(optimized_route[:-1], optimized_route[1:])):\n",
+                "    print(f\"{a} -> {b} | Speed: {opt_speeds[i]:.1f} km/h | Roads Passed: {opt_sums[i]}\")\n"
+            ]
+        })
+        
+    if c['cell_type'] == 'code' and any('Fetching real-world data from HuggingFace' in line for line in c['source']):
+        cleaned_cells.append({
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "**Note on Depot Coordinate:**<br>\n",
+                "The central Depot coordinate `(121.50500, 31.08500)` was placed centrally relative to the extracted customer nodes so that it serves as a realistic distribution origin, giving balanced routing geometry and representative travel distances."
+            ]
+        })
+        
     cleaned_cells.append(c)
 
 cleaned_cells.append(new_cell)

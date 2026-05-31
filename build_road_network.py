@@ -25,7 +25,7 @@ dataset = load_dataset("Cainiao-AI/LaDe-D", split="delivery_sh")
 df_nodes = dataset.to_pandas()
 df_subset = df_nodes[(df_nodes['ds'] == TARGET_DATE) & (df_nodes['courier_id'] == TARGET_COURIER)].head(NUM_NODES).reset_index()
 
-nodes_wgs84 = {'Depot': (121.52000, 31.08000)}
+nodes_wgs84 = {'Depot': (121.50500, 31.08500)}
 for i, row in df_subset.iterrows():
     nodes_wgs84[f"N{i+1}"] = (float(row['lng']), float(row['lat']))
 
@@ -87,7 +87,9 @@ for idx, row in df_roads.iterrows():
         time_hours = (dist_m / 1000.0) / speed_kmh
         dist_km = dist_m / 1000.0
 
+        # HARD CONSTRAINT ENFORCEMENT:
         # Add edges according to oneway direction (store fclass & speed for the per-leg breakdown)
+        # This mathematically guarantees illegal traffic flow is un-traversable in the DiGraph.
         if oneway == 'F':
             G.add_edge(u, v, weight=time_hours, length=dist_km, fclass=fclass, speed=speed_kmh)
         elif oneway == 'T':
