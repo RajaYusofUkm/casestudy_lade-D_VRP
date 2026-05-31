@@ -18,3 +18,7 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Word documents (kept local for privacy)
+*.docx
+~$*.docx
