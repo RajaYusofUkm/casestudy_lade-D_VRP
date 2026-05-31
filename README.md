@@ -17,6 +17,7 @@
 - [Metodologi](#metodologi)
 - [Konfigurasi & Cara Guna](#konfigurasi--cara-guna)
 - [Keputusan](#keputusan)
+- [Visualisasi](#-visualisasi)
 - [Requirements](#requirements)
 
 ---
@@ -68,9 +69,10 @@ antigravity/
 ├── route_comparison.png           🗺️ Perbandingan laluan
 ├── route_fclass_verification.png  🛣️ Laluan warna ikut kelas jalan
 ├── road_network_combined.png      🗺️ Peta rangkaian jalan penuh
-├── VRP_Technical_Report.docx      📄 Laporan teknikal
 └── .gitignore
 ```
+
+> 📄 **Nota:** Laporan teknikal (`VRP_Technical_Report.docx`) **tidak** disertakan dalam repo ini atas sebab privasi. Ia dijana secara lokal dengan menjalankan `python3 generate_dynamic_project.py`.
 
 ---
 
@@ -174,6 +176,52 @@ Buka `VRP_Project_Shanghai.ipynb` dalam VS Code / Jupyter dan jalankan sel secar
 | **Total Distance** | 9.06 km | — | — |
 
 > 🔍 **Kenapa NN gagal teruk?** NN memilih node paling dekat secara spatial tanpa mengambil kira time windows, menyebabkan rantai tindakan lateness yang memusnahkan. 2-Opt menyusun semula route untuk memenuhi time windows, menghapuskan penalti sepenuhnya.
+
+---
+
+## 🖼️ Visualisasi
+
+Setiap gambar di bawah dijana automatik oleh kod dan digunakan dalam laporan teknikal.
+
+### 1. Rangkaian Jalan Raya Sebenar Shanghai
+![Road Network](road_network_combined.png)
+> **Apa ini?** Rangkaian jalan raya sebenar Shanghai yang diekstrak dari OpenStreetMap. Panel **kiri** menunjukkan keseluruhan kawasan operasi; panel **kanan** zoom ke zon kritikal di mana sekatan jalan sehala (one-way) memaksa lencongan (detour) yang panjang. Node penghantaran yang terkesan ditonjolkan.
+
+### 2. Pipeline Penyelesaian (2 Fasa)
+![Pipeline](pipeline.png)
+> **Apa ini?** Carta aliran keseluruhan proses dua fasa — bila **Nearest Neighbor** (Fasa 1, pembinaan) dan **2-Opt local search** (Fasa 2, penambahbaikan) dilaksanakan.
+
+### 3. Carta Aliran Algoritma Nearest Neighbor
+![Flowchart](flowchart.png)
+> **Apa ini?** Logik membuat keputusan algoritma Nearest Neighbor — bermula dari Depot, secara tamak (greedy) menambah node terdekat yang belum dilawati sehingga semua pelanggan dilayan.
+
+### 4. Perbandingan Laluan: NN vs 2-Opt
+![Route Comparison](route_comparison.png)
+> **Apa ini?** Susun atur spatial laluan **Nearest Neighbor** (kiri, penalti tinggi) berbanding laluan **2-Opt** yang dioptimumkan (kanan). Laluan NN ada banyak garisan bersilang panjang, manakala laluan 2-Opt disusun semula supaya mematuhi time windows.
+
+### 5. Peta Interaktif OpenStreetMap (Laluan 2-Opt)
+![Shanghai Map](shanghai_map_screenshot.png)
+> **Apa ini?** Laluan 2-Opt di atas rangkaian jalan sebenar OpenStreetMap, lengkap dengan anak panah arah perjalanan dan segmen berwarna ikut kelas jalan (fclass). Segi tiga **merah** menanda node sekatan jalan sehala (N11, N14) yang hanya boleh dilalui Dijkstra mengikut arah yang sah.
+
+### 6. Profil Kelajuan Node-ke-Node
+![Speed Profile](speed_profile.png)
+> **Apa ini?** Pecahan purata kelajuan perjalanan (km/j) untuk setiap leg node-ke-node dalam urutan, membolehkan perbandingan tingkah laku NN vs 2-Opt berdasarkan topologi jalan sebenar.
+
+### 7. Perbandingan Prestasi (Komponen Objektif)
+![Performance Chart](performance_chart.png)
+> **Apa ini?** Perbandingan komponen fungsi objektif Z (skala log-simetri kerana penalti NN yang sangat besar) — jarak, penalti lewat, penalti menunggu, overtime, dan jarak berlebihan.
+
+### 8. Analisis Penumpuan (Convergence)
+![Convergence](convergence.png)
+> **Apa ini?** Kos objektif Z pada setiap pertukaran (swap) 2-Opt yang diterima. Penurunan monotonik menunjukkan tingkah laku Hill Climbing yang secara berulang lari dari penyelesaian awal yang teruk sehingga menumpu ke local optimum.
+
+### 9. Garis Masa Operasi (Gantt Chart)
+![Gantt](gantt.png)
+> **Apa ini?** Garis masa operasi setiap leg untuk kedua-dua laluan. Jadual NN didominasi penghantaran lewat (merah), manakala jadual 2-Opt menukar ia kepada perkhidmatan tepat masa (hijau) dengan kos sedikit masa menunggu (kuning).
+
+### 10. Pengesahan Laluan ikut Kelas Jalan
+![Route Verification](route_fclass_verification.png)
+> **Apa ini?** Peta pengesahan — laluan sebenar 2-Opt diwarnakan ikut kelas jalan OpenStreetMap (fclass); setiap warna sepadan dengan kelajuan kelas yang digunakan dalam matriks masa Dijkstra.
 
 ---
 
